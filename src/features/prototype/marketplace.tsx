@@ -1,3 +1,4 @@
+import { usePostHog } from "@posthog/react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowUpRight, Users, MapPin, BriefcaseBusiness, Bookmark } from "lucide-react";
@@ -26,6 +27,10 @@ import { usePrototype } from "./store";
 import { currentPerson, publishedJobs } from "./model";
 import { NotFound } from "./shell";
 import { cn } from "@/lib/utils";
+
+const posthogConfigured = Boolean(
+  import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN && import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
+);
 
 function LocalMap({ jobs }: { jobs: JobWithCompany[] }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -98,6 +103,7 @@ function LocalMap({ jobs }: { jobs: JobWithCompany[] }) {
 }
 export function JobsPage() {
   const { state } = usePrototype();
+  const posthog = usePostHog();
   const person = currentPerson(state);
   const [params, setParams] = useSearchParams();
   const filters = parseJobFilters(Object.fromEntries(params));
@@ -145,6 +151,14 @@ export function JobsPage() {
       const value = String(data.get(key) ?? "").trim();
       if (value) next.set(key, value);
       else next.delete(key);
+    }
+    if (posthogConfigured) {
+      posthog.capture("job_search_submitted", {
+        has_query: next.has("query"),
+        has_location: next.has("location"),
+        active_filter_count: [...next.keys()].filter((key) => key !== "page" && key !== "view")
+          .length,
+      });
     }
     setParams(next);
   }
@@ -342,6 +356,7 @@ export function JobPage() {
     return () => cancelAnimationFrame(frame);
   }, [location.hash, location.key, slug]);
   const { state, run } = usePrototype();
+  const posthog = usePostHog();
   const person = currentPerson(state);
   const job = publishedJobs(state).find((x) => x.slug === slug);
   if (!job) return <NotFound />;
@@ -430,7 +445,16 @@ export function JobPage() {
                     variant="outline"
                     aria-label="Zapisz ofertę"
                     aria-pressed={saved}
-                    onClick={() => run({ type: "toggle_saved", jobId: job.id })}
+                    onClick={() => {
+                      if (run({ type: "toggle_saved", jobId: job.id }) && posthogConfigured) {
+                        posthog.capture("job_saved", {
+                          job_id: job.id,
+                          saved: !saved,
+                          job_category: job.category,
+                          job_function: job.function,
+                        });
+                      }
+                    }}
                   >
                     <Bookmark className={cn(saved && "fill-current")} />
                     Zapisz ofertę
